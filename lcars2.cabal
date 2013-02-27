@@ -47,11 +47,18 @@ cabal-version:       >=1.8
 
 library
   -- Modules exported by the library.
-  exposed-modules:     Data.Torrent, Data.Torrent.Conduit
-  
+  exposed-modules:     Data.Torrent, 
+                       Data.Torrent.Conduit,
+                       Network.Torrent.Tracker
+                       Data.Torrent.TrackerTypes
+
   -- Modules included in this library but not exported.
   other-modules:       Data.Torrent.Types
-  
+  		         
   -- Other library packages from which modules are imported.
-  build-depends:       base ==4.5.*, containers ==0.4.*, bytestring ==0.9.*, conduit ==1.0.*, attoparsec-conduit ==1.0.*, utf8-string ==0.3.*, attoparsec ==0.10.*
+  build-depends:       base ==4.5.*, containers ==0.4.*, bytestring ==0.9.*, conduit ==1.0.*, attoparsec-conduit ==1.0.*, utf8-string ==0.3.*, attoparsec ==0.10.*, yesod == 1.1.*, resourcet, persistent, persistent-sqlite, persistent-template, wai, time
   
+executable tracker
+ Main-is: Tracker.hs
+ hs-source-dirs: apps
+ Build-Depends: base, lcars2
