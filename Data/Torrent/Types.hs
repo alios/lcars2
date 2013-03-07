@@ -1,6 +1,7 @@
 
 module Data.Torrent.Types 
-       ( BEncodedT
+       ( BEncodedT(..)
+       , mkBString
        , beDictUTF8
        , parseBencoded
        , beEncodeByteString
@@ -24,6 +25,7 @@ data BEncodedT =
   BList ![BEncodedT] | BDict ![(BEncodedT, BEncodedT)] 
   deriving (Show, Eq)
 
+mkBString = BString . UTF8.fromString
 
 beEncodeByteString :: BEncodedT -> ByteString
 beEncodeByteString (BString bs) = 
