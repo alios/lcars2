@@ -35,6 +35,7 @@ import Crypto.Conduit (sinkHash)
 import Crypto.Hash.SHA1
 import qualified Crypto.Classes as Crypto
 import System.Posix.Files (isDirectory, getFileStatus)
+import Network.URI
 
 import Data.Torrent.Types
 
@@ -55,13 +56,13 @@ defaultChunkSize :: Integer
 defaultChunkSize = 2 ^ 18
 
 mkTorrent :: (MonadIO m, MonadUnsafeIO m, MonadThrow m, MonadBaseControl IO m) =>
-             FilePath -> [String] -> Integer -> m (Maybe BEncodedT)  
+             FilePath -> [URI] -> Integer -> m (Maybe BEncodedT)  
 mkTorrent fp ts cSize = 
   runResourceT $ liftResourceT $ 
   mkTorrent' fp ts cSize $$ await
 
 mkTorrent' :: (MonadActive m, MonadBaseControl IO m, MonadResource m) => 
-             FilePath -> [String] -> Integer -> Producer m BEncodedT
+             FilePath -> [URI] -> Integer -> Producer m BEncodedT
 mkTorrent' fpBase' tracker cSize = do  
   -- file or directory?
   isDir <- fmap isDirectory $ liftIO $ 
@@ -98,7 +99,7 @@ mkTorrent' fpBase' tracker cSize = do
                           | (fn,l) <- fs])]
   
   yield $ BDict [
-    (mkBString "announce", mkBString ann),
+    (mkBString "announce", mkBString $ show ann),
     (mkBString "info", info)
     ]
 

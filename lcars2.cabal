@@ -10,7 +10,7 @@ name:                lcars2
 -- PVP summary:      +-+------- breaking API changes
 --                   | | +----- non-breaking API additions
 --                   | | | +--- code changes with no API change
-version:             0.1.1.2
+version:             0.2.0.0
 
 -- A short (one-line) description of the package.
 synopsis:            a lcars2 server
@@ -55,7 +55,7 @@ library
   other-modules:       Data.Torrent.Types
   		         
   -- Other library packages from which modules are imported.
-  build-depends:       base ==4.5.*, containers ==0.4.*, bytestring ==0.9.*, unix, conduit >=1.0, attoparsec-conduit >=1.0, utf8-string >=0.3, attoparsec >=0.10, network-conduit, crypto-api, cryptohash, crypto-conduit >= 0.5, resourcet, time, system-filepath, filesystem-conduit, transformers, monad-control, yesod >= 1.1, persistent-sqlite, wai, persistent-template, persistent
+  build-depends:       base, containers, bytestring, unix, conduit >=1.0, attoparsec-conduit >=1.0, utf8-string, attoparsec, network-conduit, crypto-api, cryptohash, crypto-conduit >= 0.5, resourcet, time, system-filepath, filesystem-conduit, transformers, monad-control, yesod >= 1.1, persistent-sqlite, wai, persistent-template, persistent, network
   
 executable lcars-torrent-tracker
  Main-is: Tracker.hs
@@ -65,5 +65,5 @@ executable lcars-torrent-tracker
 executable lcars-torrent-mktorrent
  Main-is: MkTorrent.hs
  hs-source-dirs: apps
- Build-Depends: base, lcars2, conduit >= 1.0, system-filepath
+ Build-Depends: base, lcars2, conduit >= 1.0, system-filepath, network
 

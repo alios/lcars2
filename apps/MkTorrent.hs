@@ -9,6 +9,8 @@ import System.Console.GetOpt
 import Data.Conduit
 import Data.Conduit.Binary
 import Data.Torrent
+import Network.URI
+import Data.Maybe (fromMaybe)
 
 testTrackers :: [String]
 testTrackers = [ "http://localhost:3000/tracker" ]
@@ -25,7 +27,7 @@ handleResult t = case t of
     exitSuccess
 
 data Flag =
-  Version | Input FilePath | ChunkSize Integer | Tracker String
+  Version | Input FilePath | ChunkSize Integer | Tracker URI
   deriving (Show, Eq)
 
 options :: [OptDescr Flag]
@@ -43,7 +45,7 @@ cs :: String -> Flag
 cs i = ChunkSize $ 2 ^ (read i)
 
 tr :: String -> Flag
-tr s = Tracker s
+tr t =  Tracker $ fromMaybe (error "unable to parse tracker URI") $ parseURI t
 
 compilerOpts :: [String] -> IO ([Flag], [String])
 compilerOpts argv = 
@@ -58,7 +60,7 @@ lookupInput [] = error "unable to lookup input file in args"
 lookupInput ((Input fp):_) = fp
 lookupInput (_:fs) = lookupInput fs
 
-lookupTracker :: [Flag] -> String
+lookupTracker :: [Flag] -> URI
 lookupTracker [] = error "unable to lookup tracker in args"
 lookupTracker ((Tracker t):_) = t
 lookupTracker (_:fs) = lookupTracker fs
