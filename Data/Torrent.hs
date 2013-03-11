@@ -5,8 +5,10 @@ module Data.Torrent
        , MetaInfo(..)
        ) where
 
+import Data.Maybe (fromJust)
 import Data.Torrent.Types
 import Data.Torrent.Conduit
+import Crypto.Hash.SHA1
 
 import Data.Map (Map)
 import qualified Data.Map as Map
@@ -14,31 +16,32 @@ import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import Data.Conduit
 import Data.Conduit.Binary 
+import Crypto.Conduit
 
 class MetaInfo t where
   metaInfo :: t -> Map String BEncodedT
   announce :: t -> String
-  announce = beStringUTF8 . beLookupKey "name" . metaInfo
+  announce = beStringUTF8 . fromJust . Map.lookup "name" . metaInfo
   info :: t -> Map String BEncodedT
-  info = beDictUTF8 . beLookupKey "info" . metaInfo
+  infoHash :: t -> IO SHA1
   infoName :: t -> String
-  infoName = beStringUTF8 . beLookupKey "name" . info
+  infoName = beStringUTF8 . fromJust . Map.lookup "info" . info 
   infoPieceLength :: t -> Integer
-  infoPieceLength = beInteger . beLookupKey "piece length" . info 
+  infoPieceLength = beInteger . fromJust . Map.lookup "piece length" . info 
   infoPieces :: t -> [ByteString]
   infoPieces mi = 
     let f bs 
           | (bs == BS.empty) = []
           | (BS.length bs >= 20) = (BS.take 20 bs) : f (BS.drop 20 bs)
           | otherwise = error $ "found invalid piece of length: " ++ show (BS.length bs)
-    in f $ beString' . beLookupKey "pieces" $ info mi
+    in f $ beString' . fromJust . Map.lookup "pieces" $ info mi
          
   infoLength :: t -> Maybe Integer
-  infoLength m = case (beLookupKey' "length" $ info m) of
+  infoLength m = case (Map.lookup "length" $ info m) of
     Nothing -> Nothing
     Just d -> Just $ beInteger d
   infoFiles :: t -> Maybe (Map String BEncodedT)
-  infoFiles m = case (beLookupKey' "files" $ info m) of
+  infoFiles m = case (Map.lookup "files" $ info m) of
     Nothing -> Nothing
     Just d -> Just $ beDictUTF8 d
   infoLengthFiles :: t -> Either Integer (Map String BEncodedT)
@@ -55,13 +58,14 @@ class MetaInfo t where
 
 instance MetaInfo BEncodedT where
   metaInfo = beDictUTF8
+  info m = case (beDict "info" m) of
+    Nothing -> error $ "unable to lookup info dict"
+    Just i -> beDictUTF8 i
+  infoHash m = case (beDict "info" m) of
+    Nothing -> fail $ "unable to lookup info dict"
+    Just i -> yield i $= conduitBdecoded $$ sinkHash
+    
 
-
-beLookupKey' k m = Map.lookup k m
-beLookupKey k m = 
-  case (beLookupKey' k m) of
-    Nothing -> error $ "unable to lookup key " ++ k ++ " in: " ++ show m
-    Just v -> v
 
 propSize :: MetaInfo t => t -> Bool
 propSize t =
@@ -72,13 +76,3 @@ propSize t =
   in case (l) of
     Nothing -> undefined
     Just l'' -> l'' == l'
-        
-g = runResourceT $ do
-  let src = sourceFile "/home/alios/tmp/t.torrent" $= conduitBencoded
-  v <- src $$ await
-  v' <- case v of
-    Nothing -> fail "unable to find bencoded data"
-    Just (_, d) -> return d
-  let dst = conduitBdecoded =$ sinkFile "/home/alios/tmp/t1.torrent" 
-  yield v' $$ dst
-  yield v' $$ sinkBdecoded

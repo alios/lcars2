@@ -3,6 +3,8 @@ module Data.Torrent.Types
        ( BEncodedT(..)
        , mkBString
        , beDictUTF8
+       , beDict
+       , beDictLookup
        , parseBencoded
        , beEncodeByteString
        , beString'
@@ -55,6 +57,13 @@ beInteger v = error $ "beInteger called on a: " ++ show v
 beList :: BEncodedT -> [BEncodedT]
 beList (BList l) = l
 beList v = error $ "beList called on a: " ++ show v
+
+
+beDictLookup :: String -> BEncodedT -> BEncodedT
+beDictLookup k = maybe (error $ "unable to lookup dict key " ++ k) id . beDict k
+
+beDict :: String -> BEncodedT -> Maybe BEncodedT
+beDict k d = Map.lookup k $ beDictUTF8 d
 
 beDict' :: BEncodedT -> Map ByteString BEncodedT
 beDict' (BDict d) = Map.fromList [(beString' k, v) | (k,v) <- d]

@@ -11,11 +11,12 @@ module Data.Torrent.Conduit
        , hashChunks
        ) where
 
-import qualified Prelude as P
-import Prelude hiding (FilePath, head)
+
+import Prelude hiding (FilePath, head, catch)
 import Filesystem.Path.CurrentOS
 import qualified Data.List as List (map)
 
+import Control.Exception
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Trans.Resource (MonadActive, liftResourceT)
 
@@ -27,14 +28,13 @@ import Data.Maybe (fromJust)
 import Data.Conduit
 import qualified Data.Conduit.List as CL
 import qualified Data.Conduit.Binary as CB
+import qualified Data.Conduit.Network as CN
 import qualified Data.Conduit.Filesystem as CFS
 import Data.Conduit.Attoparsec
 import Crypto.Conduit (sinkHash)
 import Crypto.Hash.SHA1
 import qualified Crypto.Classes as Crypto
 import System.Posix.Files (isDirectory, getFileStatus)
-
-
 
 import Data.Torrent.Types
 
@@ -119,5 +119,3 @@ hashChunks cSize = do
   case next of
     Nothing -> return ()
     Just _ -> hashChunks cSize
-
-  
