@@ -62,11 +62,14 @@ mkTorrent fp ts cSize =
 
 mkTorrent' :: (MonadActive m, MonadBaseControl IO m, MonadResource m) => 
              FilePath -> [String] -> Integer -> Producer m BEncodedT
-mkTorrent' fpBase tracker cSize = do  
+mkTorrent' fpBase' tracker cSize = do  
   -- file or directory?
   isDir <- fmap isDirectory $ liftIO $ 
-           getFileStatus $ encodeString fpBase
-  
+           getFileStatus $ encodeString fpBase'
+  let (fpBase, tname) =
+        if isDir 
+        then (fpBase' </> empty, dirname fpBase)
+        else (fpBase', filename fpBase)
   -- traverse files
   (bs', fs) <- if (isDir) 
                then liftIO $ runResourceT $ 
@@ -84,7 +87,7 @@ mkTorrent' fpBase tracker cSize = do
   let ann = maybe (error "no tracker specified") id ann'
   
   let info = BDict $ [
-        (mkBString "name", mkBString . encodeString . filename $ fpBase),
+        (mkBString "name", mkBString . encodeString $ tname),
         (mkBString "piece length", BInteger . toInteger $ cSize),
         (mkBString "pieces", BString $ pieces)
         ] ++ if ((length fs) == 1) 

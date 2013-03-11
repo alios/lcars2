@@ -21,11 +21,11 @@ import Crypto.Conduit
 class MetaInfo t where
   metaInfo :: t -> Map String BEncodedT
   announce :: t -> String
-  announce = beStringUTF8 . fromJust . Map.lookup "name" . metaInfo
+  announce = beStringUTF8 . fromJust . Map.lookup "announce" . metaInfo
   info :: t -> Map String BEncodedT
   infoHash :: t -> IO SHA1
   infoName :: t -> String
-  infoName = beStringUTF8 . fromJust . Map.lookup "info" . info 
+  infoName = beStringUTF8 . fromJust . Map.lookup "name" . info 
   infoPieceLength :: t -> Integer
   infoPieceLength = beInteger . fromJust . Map.lookup "piece length" . info 
   infoPieces :: t -> [ByteString]
