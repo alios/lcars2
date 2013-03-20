@@ -10,7 +10,7 @@ name:                lcars2
 -- PVP summary:      +-+------- breaking API changes
 --                   | | +----- non-breaking API additions
 --                   | | | +--- code changes with no API change
-version:             0.3.0.0
+version:             0.3.0.1
 
 -- A short (one-line) description of the package.
 synopsis:            a lcars2 server
@@ -47,16 +47,18 @@ cabal-version:       >=1.8
 library
   -- Modules exported by the library.
   exposed-modules:     Data.Torrent, 
+                       Data.Torrent.Types,
                        Data.Torrent.Conduit,
+                       Data.Torrent.MetaInfo,
                        Network.Torrent.Tracker
                        Network.Torrent.Client
                        Data.Torrent.TrackerTypes
 
   -- Modules included in this library but not exported.
-  other-modules:       Data.Torrent.Types
+  other-modules:    
   		         
   -- Other library packages from which modules are imported.
-  build-depends:       base, containers, bytestring, unix, conduit >=1.0, attoparsec-conduit >=1.0, utf8-string, attoparsec, network-conduit, crypto-api, cryptohash, crypto-conduit >= 0.5, bits-conduit >= 0.3, stm-conduit, crypto-random-api, cereal, resourcet, time, system-filepath, filesystem-conduit, transformers, monad-control, yesod >= 1.1, persistent-sqlite, wai, persistent-template, persistent, network
+  build-depends:       base, containers, bytestring, unix, conduit >=1.0, attoparsec-conduit >=1.0, utf8-string, attoparsec, network-conduit, crypto-api, cryptohash, crypto-conduit >= 0.5, bits-conduit >= 0.3, stm-conduit, crypto-random-api, cereal, resourcet, time, system-filepath, filesystem-conduit, transformers, monad-control, yesod >= 1.1, persistent-sqlite, wai, persistent-template, persistent, network, binary
   
 executable lcars-torrent-tracker
  Main-is: Tracker.hs
