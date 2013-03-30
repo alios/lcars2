@@ -58,7 +58,7 @@ library
   other-modules:    
   		         
   -- Other library packages from which modules are imported.
-  build-depends:       base, containers, bytestring, unix, conduit >=1.0, attoparsec-conduit >=1.0, utf8-string, attoparsec, network-conduit, crypto-api, cryptohash, crypto-conduit >= 0.5, bits-conduit >= 0.3, stm-conduit, crypto-random-api, cereal, resourcet, time, system-filepath, filesystem-conduit, transformers, monad-control, yesod >= 1.1, persistent-sqlite, wai, persistent-template, persistent, network, binary
+  build-depends:       base, containers, bytestring, unix, lifted-base, conduit >=1.0, attoparsec-conduit >=1.0, utf8-string, attoparsec, network-conduit, crypto-api, cryptohash, crypto-conduit >= 0.5, bits-conduit >= 0.3, stm-conduit, crypto-random-api, cereal, resourcet, time, system-filepath, filesystem-conduit, transformers, monad-control, yesod >= 1.1, persistent-sqlite, wai, persistent-template, persistent, network, binary, stm
   
 executable lcars-torrent-tracker
  Main-is: Tracker.hs

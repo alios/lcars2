@@ -1,3 +1,4 @@
+{-# LANGUAGE Rank2Types #-}
 module Data.Torrent.MetaInfo where
 
 import Data.Maybe (fromJust)

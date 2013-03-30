@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleContexts, Rank2Types #-}
+{-# LANGUAGE FlexibleContexts, Rank2Types, MultiParamTypeClasses, TypeFamilies, FlexibleInstances, GADTs #-}
 
 module Data.Torrent.Conduit 
        ( sinkBencoded
@@ -11,8 +11,8 @@ module Data.Torrent.Conduit
        , hashChunks
        , conduitPeerMessage
        , conduitDePeerMessage
-       , peerConnect
-       , peerListen
+--       , peerConnect
+--       , peerListen
        ) where
 
 
@@ -38,6 +38,7 @@ import qualified Data.ByteString.Lazy as BL
 import Data.Maybe (fromJust)
 
 import Data.Conduit
+import Data.Conduit.Internal (ConduitM)
 import qualified Data.Conduit.List as CL
 import qualified Data.Conduit.Binary as CB
 import qualified Data.Conduit.Network as CN
@@ -56,18 +57,116 @@ import Network.URI
 import Data.Torrent.Types
 import Data.Torrent.MetaInfo
 
+import Control.Concurrent.STM
+
 import qualified Data.Serialize as Ser
 
-data PeerAppData i m = PeerAppData { 
-  peerappInfo :: (MetaInfo i) => i,
+data PeerAppT i m = (MetaInfo i, MonadIO m) => PeerAppData { 
+  peerappInfo :: i,
   peerappMyId :: SHA1,
   peerappPeerId :: SHA1,
   peerappSink :: Consumer PeerMessage m (),
   peerappSource :: Producer m PeerMessage,
   peerappSockAddr :: SockAddr,
-  peerappLocalAddr :: Maybe SockAddr
+  peerappLocalAddr :: Maybe SockAddr,
+  peerappConnectionSt :: TVar (PeerAppConnectionSt PeerAppT)
   }
                      
+
+class (MetaInfo i, MonadIO m) => PeerApp app i m where
+  data PeerAppConnectionSt app :: *
+  modifyCSt :: app i m -> (PeerAppConnectionSt app -> PeerAppConnectionSt app) -> m ()
+  readCSt   :: app i m -> (PeerAppConnectionSt app -> Bool) -> m Bool
+  defaultConnectionSt :: PeerAppConnectionSt app
+  peerApp :: app i m -> m ()  
+  
+instance (MetaInfo i, MonadIO m) => PeerApp PeerAppT i m where
+  
+  data PeerAppConnectionSt PeerAppT = PeerAppConnectionSt {
+    cstPeerChoked :: Bool,
+    cstPeerInterested :: Bool
+    } deriving (Show, Eq)
+  
+  readCSt app a = liftIO $ fmap a $ readTVarIO tvar
+    where tvar = peerappConnectionSt app
+  
+  modifyCSt app modifier = liftIO . atomically $ modifyTVar tvar modifier
+    where tvar = peerappConnectionSt app
+  
+  defaultConnectionSt = PeerAppConnectionSt {
+    cstPeerChoked = True,
+    cstPeerInterested = False
+    }
+  
+  peerApp app = do
+    let mst = modifyCSt app
+    inp <- peerappSource app $$ await
+    case inp of
+      Nothing -> handleLocal
+      Just KeepAlive -> handleLocal
+      Just Choke -> do
+        mst (\st -> st {cstPeerChoked = True} ) 
+        handleLocal
+      Just Unchoke -> do
+        mst (\st -> st {cstPeerChoked = False} ) 
+        handleLocal
+      Just Interested -> do
+        mst (\st -> st {cstPeerInterested = True} ) 
+        handleLocal
+      Just NotInterested -> do
+        mst (\st -> st {cstPeerInterested = False} ) 
+        handleLocal
+      
+    where handleLocal = do
+            let rst = readCSt app
+            c <- rst cstPeerChoked
+            i <- rst cstPeerInterested
+            if (not c && i)
+              then undefined
+              else peerApp app
+
+
+
+{-
+
+
+--peerConnect :: (MetaInfo i) => CN.ClientSettings IO -> Maybe SHA1 -> i -> IO ()
+peerConnect s p is = CN.runTCPClient s $ peerConnect' p is s
+
+--peerConnect' :: (MetaInfo i) => Maybe SHA1 -> i -> CN.ClientSettings IO -> CN.Application IO
+peerConnect' p' i s client = do
+  -- send handshake
+  hs <- mkHandshake p' i
+  yield hs $= conduitClientHandshake $$ CN.appSink client
+  
+  -- receive handshake from peer
+  phs <- CN.appSource client $$ sinkClientHandshake
+  
+  let peerid, myPeerid :: SHA1
+      peerid = either error id $ Ser.decode $ hsPeerId phs
+      myPeerid = either error id $ Ser.decode $ hsPeerId hs
+
+  -- abort if unknown infohash or if remote side has same client id 
+  if ((hsInfoHash phs) /= (hsInfoHash hs) || (peerid == myPeerid))
+    then return ()
+    else do
+    st <- liftIO $ newTVarIO defaultConnectionSt
+    let cmSink = toConsumer $ conduitDePeerMessage =$ CN.appSink client
+        cmSource = toProducer $ CN.appSource client $= conduitPeerMessage            
+        appData = PeerAppData {
+          peerappInfo = i,
+          peerappPeerId = peerid,
+          peerappMyId = myPeerid,
+          peerappSink = cmSink,
+          peerappSource = cmSource,
+          peerappSockAddr = CN.appSockAddr client,
+          peerappLocalAddr = CN.appLocalAddr client,
+          peerappConnectionSt = st
+          }
+    peerApp appData
+
+
+
 
 peerListen :: (MetaInfo i, MonadIO m, MonadBaseControl IO m, MonadThrow m) => 
               CN.ServerSettings m -> Maybe SHA1 -> Map SHA1 i -> m ()
@@ -76,14 +175,8 @@ peerListen s p is = CN.runTCPServer s $ peerListen' p is s
 peerListen' :: (MetaInfo i, MonadIO m, MonadBaseControl IO m, MonadThrow m) => 
                Maybe SHA1 -> Map SHA1 i -> CN.ServerSettings m -> CN.Application m
 peerListen' p' is s server = do
-  -- peer id given?
-  p <- case p' of
-    Just pp -> return pp
-    Nothing -> undefined
-  
   -- receive handshake from peer
   phs <- CN.appSource server $$ sinkClientHandshake
-  
   
   let peerid = either error id $ Ser.decode $ hsPeerId phs
       cmSink = toConsumer $ conduitDePeerMessage =$ CN.appSink server
@@ -93,79 +186,54 @@ peerListen' p' is s server = do
   case i' of
     Nothing -> return ()
     Just i -> do 
+      hs <- mkHandshake p' i
+      let myPeerid = either error id $ Ser.decode $ hsPeerId hs
+      st <- liftIO $ newTVarIO defaultConnectionSt
       let appData = PeerAppData {
             peerappInfo = i,
             peerappPeerId = peerid,
-            peerappMyId = p,
+            peerappMyId = myPeerid,
             peerappSink = cmSink,
             peerappSource = cmSource,
             peerappSockAddr = CN.appSockAddr server,
-            peerappLocalAddr = CN.appLocalAddr server
+            peerappLocalAddr = CN.appLocalAddr server,
+            peerappConnectionSt = st
             }
                  
+  
       -- send handshake to peer
-      ih <- infoHash i
-      let hs = ClientHandshake {
-            hsInfoHash = ih,
-            hsPeerId = Ser.encode p,
-            hsReservedBytes = BS.pack $ replicate 8 0x00
-            }
       yield hs $= conduitClientHandshake $$ CN.appSink server
       peerApp appData
 
+-}  
 
-peerConnect :: (MetaInfo i, MonadIO m, MonadBaseControl IO m, MonadThrow m) => 
-              CN.ClientSettings m -> Maybe SHA1 -> i -> m ()
-peerConnect s p is = CN.runTCPClient s $ peerConnect' p is s
 
-peerConnect' :: (MetaInfo i, MonadIO m, MonadBaseControl IO m, MonadThrow m) => 
-                Maybe SHA1 -> i -> CN.ClientSettings m -> CN.Application m
-peerConnect' p' i s client = do
+peerId :: MonadIO m => Maybe SHA1 -> m SHA1
+peerId (Just p) = return p
+peerId Nothing = do
+  r <- liftIO $ fmap Ser.decode randomPeerId
+  case r of
+    Left err -> fail $ "unable to create random peer id: " ++ err
+    Right sha ->  return sha
+
+
+mkHandshake :: (MonadIO m, MonadThrow m, MetaInfo t) =>
+               Maybe SHA1 -> t -> m ClientHandshake
+mkHandshake p' i = do
   -- peer id given?
-  p <- case p' of
-    Just pp -> return pp
-    Nothing -> undefined
-    
+  p <- peerId p'
+  
   -- calculate info hash
   ih <- infoHash i
            
   -- send handshake to peer
-  let hs = ClientHandshake {
-        hsInfoHash = ih,
-        hsPeerId = Ser.encode p,
-        hsReservedBytes = BS.pack $ replicate 8 0x00
-        }
-  yield hs $= conduitClientHandshake $$ CN.appSink client
-  
-  -- receive handshake from peer
-  phs <- CN.appSource client $$ sinkClientHandshake
-  let peerid = either error id $ Ser.decode $ hsPeerId phs
-      
-  -- abort if unknown infohash or if remote side has same client id 
-  if (hsInfoHash phs /= ih || peerid ==p )
-    then return ()
-    else do
-    let cmSink = toConsumer $ conduitDePeerMessage =$ CN.appSink client
-        cmSource = toProducer $ CN.appSource client $= conduitPeerMessage            
-        appData = PeerAppData {
-          peerappInfo = i,
-          peerappPeerId = peerid,
-          peerappMyId = p,
-          peerappSink = cmSink,
-          peerappSource = cmSource,
-          peerappSockAddr = CN.appSockAddr client,
-          peerappLocalAddr = CN.appLocalAddr client
-          }
-    peerApp appData
+  return ClientHandshake {
+    hsInfoHash = ih,
+    hsPeerId = Ser.encode p,
+    hsReservedBytes = BS.pack $ replicate 8 0x00
+    }
 
-type PeerApp m i = Monad m => PeerAppData i m -> m ()
 
-peerApp :: PeerApp m i
-peerApp app = do
-  
-  
-  peerApp app
-  
   
   
 
