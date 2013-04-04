@@ -2,6 +2,7 @@
 module Data.Torrent.Types 
        ( BEncodedT(..)
        , mkBString
+       , beDictUTF8L
        , beDictUTF8
        , beDict
        , beDictLookup
@@ -231,12 +232,13 @@ beDict' :: BEncodedT -> Map ByteString BEncodedT
 beDict' (BDict d) = Map.fromList [(beString' k, v) | (k,v) <- d]
 beDict' v = error $ "beDict' called on a: " ++ show v
 
+beDictUTF8L :: BEncodedT -> [(String, BEncodedT)]
+beDictUTF8L (BDict d) = [(beStringUTF8 k, v) | (k,v) <- d]
+beDictUTF8L v = error $ "beDictUTF8L called on a: " ++ show v
+
 beDictUTF8 :: BEncodedT -> Map String BEncodedT
-beDictUTF8 (BDict d) = Map.fromList [(beStringUTF8 k, v) | (k,v) <- d]
-beDictUTF8 v = error $ "beDict called on a: " ++ show v
+beDictUTF8 = Map.fromList . beDictUTF8L
 
-
-  
 parseString :: Parser BEncodedT
 parseString = do
   l <- P.decimal

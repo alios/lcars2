@@ -5,6 +5,8 @@ module Network.Torrent.Client () where
 import Prelude hiding (FilePath)
 import Filesystem.Path.CurrentOS
 
+import Control.Monad
+import Control.Exception as X
 import Control.Monad.IO.Class
 import qualified Control.Concurrent.Lifted as CC
 import Data.Conduit
@@ -18,40 +20,65 @@ import Data.Torrent.Conduit
 data StorageConfig = StorageConfig {
   dataDir :: FilePath,
   torrentDir :: FilePath
-  }
+  } deriving (Eq, Show) 
 
 data StorageState = StorageSt {
   storageCfg :: StorageConfig
-  }
+  } deriving (Eq, Show)
 
 
 tryReadTorrent :: (MonadResource m) => Conduit FilePath m BEncodedT
 tryReadTorrent = awaitForever $ \fp -> do
-  t <- sourceFile fp $$ sinkBencoded
-  yield t
+  t <- runExceptionT $ (sourceFile fp $$ sinkBencoded)
+  case t of 
+    Left _ -> tryReadTorrent
+    Right t' -> yield t'
   tryReadTorrent
 
-storage :: MonadResource m => StorageConfig -> ConduitM () () m ()
+
+t :: IO ()
+t = do
+  t <- runResourceT $ st $$ await
+  print t
+  where baseDir = "/home/alios/tmp/torrent"
+        st = storage (StorageConfig (baseDir </> "d/")(baseDir </> "t/"))
+        
+        
+        
+        
+
+storage :: MonadResource m => 
+           StorageConfig -> Source m StorageState
 storage cfg = bracketP storageInit storageRelease storageMain
   where storageInit :: IO StorageState
         storageInit = do
+          liftIO . print $ "storageInit with: " ++ show cfg
           tfs <- runResourceT $ 
                  (traverse True $ torrentDir cfg) 
                  $= CL.filter (\fp -> fp `hasExtension` "torrent")
                  $= tryReadTorrent
                  $$ consume
-          
+          liftIO $ print $ length $ tfs
           return $ StorageSt {
             storageCfg = cfg
             }
           
           
 storageRelease :: StorageState -> IO ()
-storageRelease = do
-  undefined
-storageMain :: StorageState -> Conduit () m ()
+storageRelease st = do
+  liftIO . print $ "storageRelease with: " ++ show st
+
+  
+storageMain :: (MonadIO m) => StorageState -> Source m StorageState
 storageMain st = do
-  undefined
+    liftIO . print $ "storageMain with: " ++ show st
+    yield st
+    storageMain st
+
+
+
+
+
 
 {-
 initStorage :: (MonadIO m, MetaInfo meta) => 

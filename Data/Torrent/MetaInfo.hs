@@ -1,6 +1,8 @@
-{-# LANGUAGE Rank2Types #-}
+{-# LANGUAGE Rank2Types, ImpredicativeTypes #-}
+
 module Data.Torrent.MetaInfo where
 
+import Prelude hiding (FilePath)
 import Data.Maybe (fromJust)
 import Data.Torrent.Types
 import Crypto.Hash.SHA1
@@ -10,7 +12,11 @@ import qualified Data.Map as Map
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import Data.Conduit
+import Data.Conduit.Binary
+import System.IO hiding (FilePath)
 
+
+import Filesystem.Path.CurrentOS
 
 -- | Metainfo files (also known as .torrent files) are bencoded dictionaries
 class MetaInfo t where
@@ -48,10 +54,18 @@ class MetaInfo t where
   infoFiles m = case (Map.lookup "files" $ info m) of
     Nothing -> Nothing
     Just d -> Just $ beDictUTF8 d
+  infoFilesL :: t -> Maybe [(String, BEncodedT)]
+  infoFilesL m = case (Map.lookup "files" $ info m) of
+    Nothing -> Nothing
+    Just d -> Just $ beDictUTF8L d
   infoLengthFiles :: t -> Either Integer (Map String BEncodedT)
-  infoLengthFiles m = 
+  infoLengthFiles m = case infoLengthFilesL m of
+    Left l -> Left l
+    Right fs -> Right $ Map.fromList fs
+  infoLengthFilesL :: t -> Either Integer [(String, BEncodedT)]
+  infoLengthFilesL m = 
     let l  = infoLength m
-        fs = infoFiles m
+        fs = infoFilesL m
         i = info m
         lfs = (l,fs)
     in case lfs of
@@ -64,8 +78,44 @@ propSize :: MetaInfo t => t -> Bool
 propSize t =
   let c =  length (infoPieces t)
       pl = infoPieceLength t
-      l' = toInteger c * pl
+      l' = toInteger c * infoPieceLength t
       l = infoLength t
   in case (l) of
     Nothing -> undefined
     Just l'' -> l'' == l'
+
+
+
+class (MetaInfo t) => LocalMetaInfo t where
+  pieceConduits :: (MonadResource m) => 
+               t -> FilePath -> Integer -> (Consumer ByteString m (), Producer m ByteString)
+  pieceConduits m fp i =
+    let dir = fp </> (decodeString $ infoName m)
+        pl = infoPieceLength m
+    in case (infoLengthFilesL m) of
+      Left l ->
+        let i'' = pl  * i
+            i'  = if (i'' < l) then i''
+                  else error $ "piece index " ++ show i'' ++ 
+                               " out of range (l=" ++ show l ++")"
+            l'' = l - i' 
+            l'  = if (l'' > pl) then pl else l'' 
+            openBin mode p = do
+              h <- openBinaryFile (encodeString dir) mode
+              case mode of
+                WriteMode -> do
+                  hSetFileSize h l
+                  hSeek h AbsoluteSeek p
+                ReadMode -> do
+                  hSeek h AbsoluteSeek p
+              return h
+            sink = (isolate $ fromInteger l') =$= 
+                   (sinkIOHandle (openBin WriteMode i''))
+            src  = (sourceIOHandle (openBin ReadMode i'')) =$= 
+                   (isolate $ fromInteger l')
+        in (sink, src)
+          
+                                                   
+    
+  
+  
