@@ -1,4 +1,4 @@
-{-# LANGUAGE Rank2Types, ImpredicativeTypes #-}
+{-# LANGUAGE Rank2Types, ImpredicativeTypes, FlexibleInstances, UndecidableInstances #-}
 
 module Data.Torrent.MetaInfo (PieceID, MetaInfo (..), MetaInfoConduits (..))  where
 
@@ -14,11 +14,12 @@ import qualified Data.ByteString as BS
 import Data.Conduit
 import Data.Conduit.Binary
 import Crypto.Conduit
-import System.IO hiding (FilePath)
+import System.IO hiding (FilePath, openFile)
+import System.IO.Error (catchIOError)
 import qualified Data.Serialize as Ser
+import Filesystem
 
-
-import Filesystem.Path.CurrentOS
+import Filesystem.Path.CurrentOS as FP
 
 -- | Metainfo files (also known as .torrent files) are bencoded dictionaries
 class MetaInfo t where
@@ -51,20 +52,26 @@ class MetaInfo t where
   infoLength m = case (Map.lookup "length" $ info m) of
     Nothing -> Nothing
     Just d -> Just $ beInteger d
-  infoFiles :: t -> Maybe (Map String BEncodedT)
+  infoFiles :: t -> Maybe (Map FilePath Integer)
   -- | For the purposes of the other keys, the multi-file case is treated as only having a single file by concatenating the files in the order they appear in the files list. The files list is the value files maps to, and is a list of dictionaries containing the following keys: 'length', 'path'.
-  infoFiles m = case (Map.lookup "files" $ info m) of
+  infoFiles m = case (infoFilesL m) of
     Nothing -> Nothing
-    Just d -> Just $ beDictUTF8 d
-  infoFilesL :: t -> Maybe [(String, BEncodedT)]
+    Just d -> Just $ Map.fromList d
+  infoFilesL :: t -> Maybe [(FilePath, Integer)]
   infoFilesL m = case (Map.lookup "files" $ info m) of
     Nothing -> Nothing
-    Just d -> Just $ beDictUTF8L d
-  infoLengthFiles :: t -> Either Integer (Map String BEncodedT)
+    Just d -> 
+      let dds = map beDictUTF8 $ beList d 
+          dp x = 
+            let ps = map beStringUTF8 $ beList $ fromJust $ Map.lookup "path" x
+            in FP.concat $ map decodeString ps
+          dl x = beInteger $ fromJust $ Map.lookup "length" x
+      in Just $ [(dp dd, dl dd)| dd <- dds]
+  infoLengthFiles :: t -> Either Integer (Map FilePath Integer)
   infoLengthFiles m = case infoLengthFilesL m of
     Left l -> Left l
     Right fs -> Right $ Map.fromList fs
-  infoLengthFilesL :: t -> Either Integer [(String, BEncodedT)]
+  infoLengthFilesL :: t -> Either Integer [(FilePath, Integer)]
   infoLengthFilesL m = 
     let l  = infoLength m
         fs = infoFilesL m
@@ -78,7 +85,31 @@ class MetaInfo t where
   
 type PieceID = Integer
 
+createDirectoryP = createDirectory True
+
+instance (MetaInfo t) => MetaInfoConduits t
+
 class (MetaInfo t) => MetaInfoConduits t where
+  metaInit :: t -> FilePath -> IO [Bool]
+  metaInit m dir = do
+    -- init the directory
+    createDirectoryP dir
+    let dir' = dir </> (decodeString $ infoName m)
+    let ioActions = case (infoLengthFilesL m) of
+          Left l -> do
+            setFileSize dir' l
+          Right fs ->
+            let fileA (f,l) = do
+                  let fn = dir' </> f
+                  createDirectoryP $ directory fn
+                  setFileSize fn l
+            in do
+              _ <- sequence $ map fileA fs
+              return ()
+    catchIOError ioActions $ \e -> fail $ show e
+    let pcount = length . infoPieces $ m
+    sequence [pieceValid m dir (toInteger i) | i <- [0 .. (pcount - 1)]]
+    
   pieceValid :: t -> FilePath -> PieceID -> IO Bool
   pieceValid m fp i = runResourceT $ do
     let (_, src) = pieceConduits m fp i
@@ -99,16 +130,13 @@ class (MetaInfo t) => MetaInfoConduits t where
         i'' = pl  * i
         iName = (decodeString $ infoName m)
         ps =  findPieces i'' pl $ case (infoLengthFilesL m) of
-          Right fs' -> map fileInfoDecode fs'
-          Left l -> [(infoName m, l)]  
+          Right fs' -> fs'
+          Left l -> [(iName, l)]  
         dir = case (infoLengthFilesL m) of
           Right _ -> fp </> iName
           Left _ -> fp
     in (piecesSink dir ps, piecesSource dir ps)
-  
-
-                                  
-    
+                                    
 piecesSink :: (MonadResource m) => 
               FilePath -> [(FilePath, Integer, Integer)] -> Consumer ByteString m ()
 piecesSink _ [] = return ()
@@ -120,6 +148,7 @@ piecesSink d ((fn, p, l):fs) =
     
 piecesSource :: (MonadResource m) => 
                 FilePath -> [(FilePath, Integer, Integer)] -> Producer m ByteString
+piecesSource _ [] = return ()
 piecesSource d ((fn, p, l):fs) = 
   let src = sourceIOHandle $ openBin ReadMode p l (d </> fn) 
   in do
@@ -131,17 +160,20 @@ openBin mode p l dir = do
   h <- openBinaryFile (encodeString dir) mode
   hSeek h AbsoluteSeek p
   return h
-
-fileInfoDecode :: (String, BEncodedT) -> (String, Integer)
-fileInfoDecode (k, v) = (k, beInteger $ v)  
   
-findPieces :: Integer -> Integer -> [(String, Integer)] -> [(FilePath, Integer, Integer)]  
+findPieces :: Integer -> Integer -> [(FilePath, Integer)] -> [(FilePath, Integer, Integer)]  
+findPieces _ _ [] = []
 findPieces p l ((fn, fl):fs) =
   let pb = p < fl
       pe = (p + l) < fl
   in if (not pb)
      then findPieces (p - fl) l fs
-     else (decodeString fn, p, l) : 
+     else (fn, p, l) : 
           if (pe) then []
           else findPieces 0 (l - fl) fs
-       
+
+setFileSize :: FilePath -> Integer -> IO ()
+setFileSize fp l = do
+  h <- openFile fp WriteMode;
+  hSetFileSize h l
+  hClose h;

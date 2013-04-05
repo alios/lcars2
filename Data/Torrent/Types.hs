@@ -2,6 +2,7 @@
 module Data.Torrent.Types 
        ( BEncodedT(..)
        , mkBString
+       , beList
        , beDictUTF8L
        , beDictUTF8
        , beDict

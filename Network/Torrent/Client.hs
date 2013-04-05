@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings, NoMonomorphismRestriction #-}
 
-module Network.Torrent.Client () where
+module Network.Torrent.Client (StorageConfig(..), storage) where
 
 import Prelude hiding (FilePath)
 import Filesystem.Path.CurrentOS
@@ -15,7 +15,7 @@ import Data.Conduit.List  as CL
 
 import Data.Torrent.MetaInfo
 import Data.Torrent.Types
-import Data.Torrent.Conduit
+import Data.Torrent
 
 data StorageConfig = StorageConfig {
   dataDir :: FilePath,
@@ -44,7 +44,6 @@ t = do
         st = storage (StorageConfig (baseDir </> "d/")(baseDir </> "t/"))
         
         
-          
 storage :: MonadResource m => 
            StorageConfig -> Source m StorageState
 storage cfg = bracketP storageInit storageRelease storageMain
@@ -52,7 +51,7 @@ storage cfg = bracketP storageInit storageRelease storageMain
         storageInit = do
           liftIO . print $ "storageInit with: " ++ show cfg
           tfs <- runResourceT $ readTorrentsConduit
-          liftIO $ print $ length $ tfs
+          tpvs <- liftIO $ Prelude.sequence [metaInit t $ dataDir cfg | t <- tfs]
           return $ StorageSt {
             storageCfg = cfg
             }
