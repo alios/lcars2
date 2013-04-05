@@ -1,6 +1,6 @@
 {-# LANGUAGE Rank2Types, ImpredicativeTypes #-}
 
-module Data.Torrent.MetaInfo (MetaInfo (..), MetaInfoConduits (..))  where
+module Data.Torrent.MetaInfo (PieceID, MetaInfo (..), MetaInfoConduits (..))  where
 
 import Prelude hiding (FilePath)
 import Data.Maybe (fromJust)
@@ -13,7 +13,9 @@ import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import Data.Conduit
 import Data.Conduit.Binary
+import Crypto.Conduit
 import System.IO hiding (FilePath)
+import qualified Data.Serialize as Ser
 
 
 import Filesystem.Path.CurrentOS
@@ -73,22 +75,25 @@ class MetaInfo t where
       (Just l', Nothing) -> Left l'
       (Nothing, Just fs') -> Right fs'
       (Just _, Just _) -> error $ "error, both 'length' and 'files' in: " ++ show i
-
-propSize :: MetaInfo t => t -> Bool
-propSize t =
-  let c =  length (infoPieces t)
-      pl = infoPieceLength t
-      l' = toInteger c * infoPieceLength t
-      l = infoLength t
-  in case (l) of
-    Nothing -> undefined
-    Just l'' -> l'' == l'
-
-
+  
+type PieceID = Integer
 
 class (MetaInfo t) => MetaInfoConduits t where
+  pieceValid :: t -> FilePath -> PieceID -> IO Bool
+  pieceValid m fp i = runResourceT $ do
+    let (_, src) = pieceConduits m fp i
+    src $$ pieceValidator m i 
+  pieceValidator :: (MonadResource m) => t -> PieceID -> Consumer ByteString m Bool
+  pieceValidator m i =
+    let p :: Either String SHA1 
+        p = Ser.decode $ (infoPieces m) !! fromInteger i
+    in case (p) of
+      Left err -> do fail err
+      Right d -> do
+        d' <- (isolate $ fromInteger $ infoPieceLength m) =$= sinkHash 
+        return $ d' == d
   pieceConduits :: (MonadResource m) => 
-               t -> FilePath -> Integer -> (Consumer ByteString m (), Producer m ByteString)
+               t -> FilePath -> PieceID -> (Consumer ByteString m (), Producer m ByteString)
   pieceConduits m fp i =
     let pl = infoPieceLength m
         i'' = pl  * i
@@ -100,9 +105,8 @@ class (MetaInfo t) => MetaInfoConduits t where
           Right _ -> fp </> iName
           Left _ -> fp
     in (piecesSink dir ps, piecesSource dir ps)
+  
 
-fileInfoDecode :: (String, BEncodedT) -> (String, Integer)
-fileInfoDecode (k, v) = (k, beInteger $ v)
                                   
     
 piecesSink :: (MonadResource m) => 
@@ -125,14 +129,11 @@ piecesSource d ((fn, p, l):fs) =
 openBin :: IOMode -> Integer -> Integer -> FilePath -> IO Handle
 openBin mode p l dir = do
   h <- openBinaryFile (encodeString dir) mode
-  case mode of
-    WriteMode -> do
-      hSetFileSize h l
-      hSeek h AbsoluteSeek p
-    ReadMode -> do
-      hSeek h AbsoluteSeek p
+  hSeek h AbsoluteSeek p
   return h
 
+fileInfoDecode :: (String, BEncodedT) -> (String, Integer)
+fileInfoDecode (k, v) = (k, beInteger $ v)  
   
 findPieces :: Integer -> Integer -> [(String, Integer)] -> [(FilePath, Integer, Integer)]  
 findPieces p l ((fn, fl):fs) =
