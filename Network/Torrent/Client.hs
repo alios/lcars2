@@ -44,25 +44,24 @@ t = do
         st = storage (StorageConfig (baseDir </> "d/")(baseDir </> "t/"))
         
         
-        
-        
-
+          
 storage :: MonadResource m => 
            StorageConfig -> Source m StorageState
 storage cfg = bracketP storageInit storageRelease storageMain
   where storageInit :: IO StorageState
         storageInit = do
           liftIO . print $ "storageInit with: " ++ show cfg
-          tfs <- runResourceT $ 
-                 (traverse True $ torrentDir cfg) 
-                 $= CL.filter (\fp -> fp `hasExtension` "torrent")
-                 $= tryReadTorrent
-                 $$ consume
+          tfs <- runResourceT $ readTorrentsConduit
           liftIO $ print $ length $ tfs
           return $ StorageSt {
             storageCfg = cfg
             }
-          
+        readTorrentsConduit =        
+          (traverse True $ torrentDir cfg) 
+          $= CL.filter (\fp -> fp `hasExtension` "torrent")
+          $= tryReadTorrent
+          $$ consume
+  
           
 storageRelease :: StorageState -> IO ()
 storageRelease st = do

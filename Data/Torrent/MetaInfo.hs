@@ -1,6 +1,6 @@
 {-# LANGUAGE Rank2Types, ImpredicativeTypes #-}
 
-module Data.Torrent.MetaInfo where
+module Data.Torrent.MetaInfo (MetaInfo (..), MetaInfoConduits (..))  where
 
 import Prelude hiding (FilePath)
 import Data.Maybe (fromJust)
@@ -86,36 +86,61 @@ propSize t =
 
 
 
-class (MetaInfo t) => LocalMetaInfo t where
+class (MetaInfo t) => MetaInfoConduits t where
   pieceConduits :: (MonadResource m) => 
                t -> FilePath -> Integer -> (Consumer ByteString m (), Producer m ByteString)
   pieceConduits m fp i =
-    let dir = fp </> (decodeString $ infoName m)
-        pl = infoPieceLength m
-    in case (infoLengthFilesL m) of
-      Left l ->
-        let i'' = pl  * i
-            i'  = if (i'' < l) then i''
-                  else error $ "piece index " ++ show i'' ++ 
-                               " out of range (l=" ++ show l ++")"
-            l'' = l - i' 
-            l'  = if (l'' > pl) then pl else l'' 
-            openBin mode p = do
-              h <- openBinaryFile (encodeString dir) mode
-              case mode of
-                WriteMode -> do
-                  hSetFileSize h l
-                  hSeek h AbsoluteSeek p
-                ReadMode -> do
-                  hSeek h AbsoluteSeek p
-              return h
-            sink = (isolate $ fromInteger l') =$= 
-                   (sinkIOHandle (openBin WriteMode i''))
-            src  = (sourceIOHandle (openBin ReadMode i'')) =$= 
-                   (isolate $ fromInteger l')
-        in (sink, src)
-          
-                                                   
+    let pl = infoPieceLength m
+        i'' = pl  * i
+        iName = (decodeString $ infoName m)
+        ps =  findPieces i'' pl $ case (infoLengthFilesL m) of
+          Right fs' -> map fileInfoDecode fs'
+          Left l -> [(infoName m, l)]  
+        dir = case (infoLengthFilesL m) of
+          Right _ -> fp </> iName
+          Left _ -> fp
+    in (piecesSink dir ps, piecesSource dir ps)
+
+fileInfoDecode :: (String, BEncodedT) -> (String, Integer)
+fileInfoDecode (k, v) = (k, beInteger $ v)
+                                  
     
+piecesSink :: (MonadResource m) => 
+              FilePath -> [(FilePath, Integer, Integer)] -> Consumer ByteString m ()
+piecesSink _ [] = return ()
+piecesSink d ((fn, p, l):fs) = 
+  let sink = sinkIOHandle $ openBin WriteMode p l (d </> fn) 
+  in do  
+    (isolate $ fromInteger l) =$= sink
+    piecesSink d fs
+    
+piecesSource :: (MonadResource m) => 
+                FilePath -> [(FilePath, Integer, Integer)] -> Producer m ByteString
+piecesSource d ((fn, p, l):fs) = 
+  let src = sourceIOHandle $ openBin ReadMode p l (d </> fn) 
+  in do
+    src =$= (isolate $ fromInteger l)
+    piecesSource d fs
+
+openBin :: IOMode -> Integer -> Integer -> FilePath -> IO Handle
+openBin mode p l dir = do
+  h <- openBinaryFile (encodeString dir) mode
+  case mode of
+    WriteMode -> do
+      hSetFileSize h l
+      hSeek h AbsoluteSeek p
+    ReadMode -> do
+      hSeek h AbsoluteSeek p
+  return h
+
   
-  
+findPieces :: Integer -> Integer -> [(String, Integer)] -> [(FilePath, Integer, Integer)]  
+findPieces p l ((fn, fl):fs) =
+  let pb = p < fl
+      pe = (p + l) < fl
+  in if (not pb)
+     then findPieces (p - fl) l fs
+     else (decodeString fn, p, l) : 
+          if (pe) then []
+          else findPieces 0 (l - fl) fs
+       
