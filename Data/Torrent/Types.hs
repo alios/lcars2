@@ -65,6 +65,7 @@ data PeerMessage =
   Cancel Int Int Int
   deriving (Show, Eq)
 
+
 instance Binary PeerMessage where
   put = putPeerMessage
   get = getPeerMessage

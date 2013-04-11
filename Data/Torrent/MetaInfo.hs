@@ -1,6 +1,6 @@
 {-# LANGUAGE Rank2Types, ImpredicativeTypes, FlexibleInstances, UndecidableInstances #-}
 
-module Data.Torrent.MetaInfo (PieceID, MetaInfo (..), MetaInfoConduits (..))  where
+module Data.Torrent.MetaInfo (PieceID, MetaInfo (..), SHA1, MetaInfoConduits (..))  where
 
 import Prelude hiding (FilePath)
 import Data.Maybe (fromJust)
